@@ -1,13 +1,6 @@
 import express from "express";
 import fetch from "node-fetch";
-import cors from "cors";
-
 const app = express();
-app.use(cors());
-
-app.get("/", (req, res) => {
-  res.json({ message: "Binance Proxy is running!" });
-});
 
 app.get("/api/ticker/price", async (req, res) => {
   try {
@@ -19,4 +12,9 @@ app.get("/api/ticker/price", async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log("Server running on port 3000"));
+app.get("/", (req, res) => {
+  res.send("Binance Proxy is running...");
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Server is running on port ${port}`));
