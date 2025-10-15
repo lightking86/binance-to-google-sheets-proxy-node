@@ -9,10 +9,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ Proxy toàn bộ request /api/v3/... đến Binance
+// ✅ Proxy tất cả request /api/v3/... đến Binance thật
 app.get("/api/v3/*", async (req, res) => {
   try {
-    const path = req.originalUrl.replace("/api", "");
+    const path = req.originalUrl.replace("/api", ""); // giữ nguyên phần /v3/time, /v3/ticker/price,...
     const response = await fetch("https://api.binance.com" + path);
     const data = await response.text();
     res.send(data);
