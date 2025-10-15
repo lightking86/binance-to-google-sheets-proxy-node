@@ -1,74 +1,101 @@
-const express = require('express');
-const fetch = require('node-fetch');
+import express from "express";
+import fetch from "node-fetch";
+import NodeCache from "node-cache";
 
+const DEBUG = false; // đặt true nếu muốn log ra console
 const app = express();
+const cache = new NodeCache({ stdTTL: 60 }); // cache 60 giây
+const PORT = process.env.PORT || 3000;
 
-// ----------------- Config -----------------
-const CACHE_TTL = 60 * 1000; // 60 giây
-const cache = {}; // in-memory cache
+// ==============================
+// API endpoint chính
+// ==============================
+app.get("/", (req, res) => {
+  res.send("✅ Binance Proxy is running and ready for Google Sheets.");
+});
 
-// ----------------- Helper -----------------
-function getCache(key) {
-  const now = Date.now();
-  if (cache[key] && (now - cache[key].timestamp < CACHE_TTL)) {
-    return cache[key].data;
+// ==============================
+// Hàm helper lấy dữ liệu từ Binance
+// ==============================
+async function fetchFromBinance(url) {
+  // kiểm tra cache
+  const cached = cache.get(url);
+  if (cached) {
+    if (DEBUG) console.log("cache hit:", url);
+    return cached;
   }
-  return null;
-}
 
-function setCache(key, data) {
-  cache[key] = { data, timestamp: Date.now() };
-}
+  if (DEBUG) console.log("fetching:", url);
 
-async function fetchFromBinance(path, target) {
-  const cached = getCache(path);
-  if (cached) return cached;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
+  }
 
-  const url = target + path;
-  const headers = {};
-  if (process.env.BINANCE_API_KEY) headers['X-MBX-APIKEY'] = process.env.BINANCE_API_KEY;
-
-  const resp = await fetch(url, { headers, timeout: 10000 });
-  const data = await resp.json();
-  setCache(path, data);
+  const data = await response.json();
+  cache.set(url, data);
   return data;
 }
 
-// ----------------- Proxy function -----------------
-function makeProxy(pathPrefix, target) {
-  app.use(pathPrefix, async (req, res) => {
-    try {
-      const path = req.originalUrl.replace(pathPrefix, '');
-      const data = await fetchFromBinance(path, target);
-      res.json(data);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-}
-
-// ----------------- Spot/Futures/Delivery -----------------
-makeProxy('/api/spot', 'https://api.binance.com');       // Spot API
-makeProxy('/api/futures', 'https://fapi.binance.com');   // Futures USDT
-makeProxy('/api/delivery', 'https://dapi.binance.com');  // Delivery Coin-margined
-
-// ----------------- Custom route /api/prices -----------------
-app.get('/api/prices', async (req, res) => {
+// ==============================
+// 1️⃣ Route tổng hợp: /api/prices
+// Lấy toàn bộ giá Spot, Futures, Delivery
+// ==============================
+app.get("/api/prices", async (req, res) => {
   try {
-    const data = await fetchFromBinance('/api/v3/ticker/price', 'https://api.binance.com');
+    const [spot, futures, delivery] = await Promise.all([
+      fetchFromBinance("https://api.binance.com/api/v3/ticker/price"),
+      fetchFromBinance("https://fapi.binance.com/fapi/v1/ticker/price"),
+      fetchFromBinance("https://dapi.binance.com/dapi/v1/ticker/price"),
+    ]);
+
+    const merged = [
+      ...spot.map((x) => ({ ...x, market: "spot" })),
+      ...futures.map((x) => ({ ...x, market: "futures" })),
+      ...delivery.map((x) => ({ ...x, market: "delivery" })),
+    ];
+
+    res.json(merged);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==============================
+// 2️⃣ Proxy linh hoạt cho từng endpoint
+// Ví dụ: /api/spot/api/v3/time
+// ==============================
+app.get("/api/:market/*", async (req, res) => {
+  try {
+    const { market } = req.params;
+    const path = req.params[0];
+    let baseUrl;
+
+    switch (market) {
+      case "spot":
+        baseUrl = "https://api.binance.com/api/";
+        break;
+      case "futures":
+        baseUrl = "https://fapi.binance.com/fapi/";
+        break;
+      case "delivery":
+        baseUrl = "https://dapi.binance.com/dapi/";
+        break;
+      default:
+        return res.status(400).json({ error: "Invalid market. Use spot, futures, or delivery." });
+    }
+
+    const url = baseUrl + path + (req.url.includes("?") ? req.url.split("?")[1] : "");
+    const data = await fetchFromBinance(url);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ----------------- Health Check -----------------
-app.get('/', (req, res) => {
-  res.send('Binance Proxy Node.js is running with 60s cache!');
-});
-
-// ----------------- Start Server -----------------
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Binance Proxy listening on port ${port}`);
+// ==============================
+// Chạy server
+// ==============================
+app.listen(PORT, () => {
+  console.log(`🚀 Proxy server is running on port ${PORT}`);
 });
