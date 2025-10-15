@@ -6,12 +6,10 @@ const app = express();
 const cache = new NodeCache({ stdTTL: 60 }); // cache 60 giây
 const PORT = process.env.PORT || 3000;
 
-// Root check
 app.get("/", (req, res) => {
   res.send("✅ Binance Proxy is running and ready for Google Sheets.");
 });
 
-// Lấy dữ liệu có cache
 async function fetchFromBinance(url) {
   const cached = cache.get(url);
   if (cached) return cached;
@@ -23,7 +21,6 @@ async function fetchFromBinance(url) {
   return data;
 }
 
-// Route chính /api/prices
 app.get("/api/prices", async (req, res) => {
   try {
     const [spot, futures, delivery] = await Promise.all([
@@ -42,7 +39,6 @@ app.get("/api/prices", async (req, res) => {
   }
 });
 
-// Route động /api/:market/*
 app.get("/api/:market/*", async (req, res) => {
   try {
     const { market } = req.params;
@@ -62,5 +58,4 @@ app.get("/api/:market/*", async (req, res) => {
   }
 });
 
-// Lắng nghe
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
