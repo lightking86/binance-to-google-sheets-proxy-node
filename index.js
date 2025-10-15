@@ -1,56 +1,54 @@
+// ---------- Binance Proxy Server (Railway Edition) ----------
+// Tác giả: ChatGPT + liki
+// Mục đích: Làm proxy trung gian giữa Google Sheets và Binance API
+
 import express from "express";
 import fetch from "node-fetch";
-import NodeCache from "node-cache";
+import cors from "cors";
 
 const app = express();
-const cache = new NodeCache({ stdTTL: 60 }); // cache 60 giây
-const PORT = process.env.PORT || 3000;
+app.use(cors());
+app.use(express.json());
 
+const PORT = process.env.PORT || 8080;
+
+// ------------------- Cấu hình -------------------
+const MARKETS = {
+  spot: "https://api.binance.com/",
+  futures: "https://fapi.binance.com/",
+  delivery: "https://dapi.binance.com/",
+};
+
+// ------------------- Hàm fetch dữ liệu -------------------
+async function fetchFromBinance(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Binance error: ${response.status} - ${errText}`);
+  }
+  return await response.json();
+}
+
+// ------------------- Route kiểm tra hoạt động -------------------
 app.get("/", (req, res) => {
   res.send("✅ Binance Proxy is running and ready for Google Sheets.");
 });
 
-async function fetchFromBinance(url) {
-  const cached = cache.get(url);
-  if (cached) return cached;
-
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Binance error: ${response.status}`);
-  const data = await response.json();
-  cache.set(url, data);
-  return data;
-}
-
-app.get("/api/prices", async (req, res) => {
-  try {
-    const [spot, futures, delivery] = await Promise.all([
-      fetchFromBinance("https://api.binance.com/api/v3/ticker/price"),
-      fetchFromBinance("https://fapi.binance.com/fapi/v1/ticker/price"),
-      fetchFromBinance("https://dapi.binance.com/dapi/v1/ticker/price"),
-    ]);
-    const merged = [
-      ...spot.map(x => ({ ...x, market: "spot" })),
-      ...futures.map(x => ({ ...x, market: "futures" })),
-      ...delivery.map(x => ({ ...x, market: "delivery" })),
-    ];
-    res.json(merged);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// ------------------- Proxy cho từng thị trường -------------------
+// Cú pháp: /api/:market/*
+// Ví dụ:   /api/spot/api/v3/time
+//           /api/futures/fapi/v1/premiumIndex
 app.get("/api/:market/*", async (req, res) => {
   try {
     const { market } = req.params;
     const path = req.params[0];
-    let baseUrl = "";
+    const baseUrl = MARKETS[market];
 
-    if (market === "spot") baseUrl = "https://api.binance.com/api/";
-    else if (market === "futures") baseUrl = "https://fapi.binance.com/fapi/";
-    else if (market === "delivery") baseUrl = "https://dapi.binance.com/dapi/";
-    else return res.status(400).json({ error: "Invalid market" });
+    if (!baseUrl) return res.status(400).json({ error: "Invalid market" });
 
-    const url = baseUrl + path + (req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "");
+    const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    const url = baseUrl + path + query;
+
     const data = await fetchFromBinance(url);
     res.json(data);
   } catch (err) {
@@ -58,4 +56,7 @@ app.get("/api/:market/*", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// ------------------- Khởi chạy -------------------
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
